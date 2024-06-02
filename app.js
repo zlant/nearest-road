@@ -75,8 +75,7 @@ layerControl.addTo(map)
 var lanes = [];
 
 var overpassUrl = 'https://overpass.kumi.systems/api/interpreter?data='
-var overpassQuery = '[out:json][timeout:25];(way["highway"~"^motorway|trunk|primary|secondary|tertiary|unclassified|residential|service|living_street|track|road"]({{bbox}}););out body;>;out meta qt;(nwr[building]({{bbox}}););out center;'
-
+var overpassQuery = '[out:json][timeout:25];(way["highway"~"^motorway|trunk|primary|secondary|tertiary|unclassified|residential|service|living_street|track|road|pedestrian|footway|path"]({{bbox}}););out body;>;out meta qt;(nwr[building]({{bbox}});node[entrance]({{bbox}}););out center;'
 var nominatimUrl = 'https://nominatim.openstreetmap.org/reverse?format=json&zoom=10'
 var placeOsmId, placeOsmType
 
@@ -102,13 +101,16 @@ function parseContent(content) {
     var nodes = {}
     var buildings = []
     for (var element of content.elements) {
-        if (element.type === 'way' && element.tags && element.tags.highway)
+        if (element.type === 'way' && element.tags?.highway)
             ways.push(element.nodes)
-        else if (element.tags && element.tags.building) {
+        else if (element.tags?.building) {
             if (element.center)
-                buildings.push(element.center)
+                buildings.push({ ...element.center, type: 'building' })
             else if (element.type === 'node')
-                buildings.push({ lat: element.lat, lon: element.lon })
+                buildings.push({ lat: element.lat, lon: element.lon, type: 'building' })
+        } else if (element.tags?.entrance && element.type === 'node') {
+            buildings.push({ lat: element.lat, lon: element.lon, type: 'entrance' })
+            nodes[element.id] = { lat: element.lat, lon: element.lon }
         } else if (element.type === 'node')
             nodes[element.id] = { lat: element.lat, lon: element.lon }
     }
@@ -121,28 +123,28 @@ function parseContent(content) {
     paths = []
     for(var building of buildings){
         var min = Infinity
-        var path = null
+        var pathLine = null
         var point = turf.point([building.lon, building.lat])
         for(var line of lines){
             var intersect = turf.nearestPointOnLine(line, point)
             var distance = turf.distance(point, intersect, {units: 'miles'})
             if(distance < min) {
                 min = distance
-                path = [point.geometry.coordinates.slice().reverse(), 
+                pathLine = [point.geometry.coordinates.slice().reverse(), 
                     intersect.geometry.coordinates.slice().reverse()]
             }
         }
-        paths.push(path)
+        paths.push({ line: pathLine, type: building.type })
     }
 
     return paths
 }
 
-function render(dublicates){
-    for(var duplicate of dublicates)
-        lanes.push(L.polyline(duplicate,
+function render(paths){
+    for(var path of paths)
+        lanes.push(L.polyline(path.line,
             {
-                color: 'red',
+                color: path.type === 'building' ? 'red' : 'blue',
                 weight: 2,
             })
             .addTo(map))
